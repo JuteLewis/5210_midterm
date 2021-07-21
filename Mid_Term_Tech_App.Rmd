@@ -1,0 +1,111 @@
+---
+title: "Effects of Promotions on the Sale of GM Cereals"
+author: "Glen Lewis"
+date: "MM/DD/YYYY"   
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include = FALSE}
+# Course: 5210 Data Visualization 
+# Purpose: Mid Term Project
+# Date: 
+# Author: Glen Lewis
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+# Hypothesizes and Assessment Criteria
+
+H1~0~ = Promotions did not impact sales of GM cereal products
+<br> H1~A~ = Promotions did impact the sales of GM cereal products
+
+*H1 assess how effective GM promotions are at increasing sales.*
+
+The impact of a type I error would be to create a perceived business environment where decision makers believe their promotion efforts have an influence on increasing sales when they are not.  This environment may lead to decision-making that continues following a strategy that is unknowingly ineffective, leading to flat if not declining sales.  
+
+The impact of a type II error is interesting in that it would great a perceived business environment where decision makers believe their promotion efforts are ineffective at influencing sales when they are.   This environment may lead to the unnecessary adoption of a new strategy or the wasteful allocates of resources to produce an effect that is already occurring.  Those decisions: however, could also expand/grow the positive effects their current promotion strategies are having. 
+
+A type I error could lead to flat sales - a significant opportunity cost – that grows which each passing day. A type II error may or may not have a negative impact on future sales depending; thus, we consider a type I error as the bigger risk.  Therefore, the study will set alpha to .05 minimizing the potential for a type I error when answering H1. 
+
+H2~0~ = GM promotion techniques were not more effective than other Brands' promotion techniques
+<br> H2~A~ = GM promotion techniques were more effective than other Brands' promotion techniques.
+
+*H2 assess how effective GM sale promotions are in raising sales vis-a-vis it's competitors' promotions' efforts.*  
+
+The impact of a type I error would create a perceived business environment where decision makers believe their promotion techniques are more effect than the competitions.  This environment may lead to decision-making to continue following a strategy that is ineffective and unknowingly opening market expansion opportunities to competitors. 
+
+The impact of a type II error is like a type II error for H1. While it could lead to the unnecessary allocation of resources, that reallocation could augment the competitive advantage its current efforts are unknowing creating.
+
+A type I error could lead to a loss of market share, something GM could not easily regain without significant effort and cost. A type II error may or may not have a negative impact on future sales depending; thus, we consider a type I error as the bigger risk.  Therefore, the study will set alpha to .05 minimizing the potential for a type I error when answering H2.
+
+# Load and transform data
+```{r}
+library(tidyverse) # For cleaning data.
+library(lubridate) # For date conversions.
+library(vtable) # To conduct descriptive EDA.
+library(patchwork) # Use to put graphs together (faceting) in the same frame.
+library(scales) # To get convert axis scales and labels.
+library(here) # For saving plots to specific folders.
+library(jtools) # For reviewing and plotting lm relationships.
+library(janitor) 
+library(ggannotate) # For annotations.
+```
+
+# Cleaning and 'Tidying' Data
+```{r}
+# Following loads the data csv's into the environment via a base_product_data and base_sales_data objects.
+
+base_product_data <- read_csv('mtp_product_data.csv')
+base_sales_data <- read_csv('mtp_sales_data.csv')
+
+head(base_product_data, 10)
+# NOTE: For small data sets with few variables head easier that vtable. 
+
+vtable(base_sales_data) 
+# FOR ACTION: (1) Standardize UPCs in both data sets to act as a key for a join. (2) Join the to data sets into a single base set. (3) Convert the promo and add variables to factors.
+
+wip_product_data <- base_product_data %>% 
+  mutate(UPC = str_remove(UPC, '^00-')) %>% 
+  # removes the 00- characters from the UPC
+  mutate(UPC = str_replace_all(UPC, '-', '\\.')) %>% 
+  # replaces the - in the UPC with a '.'.  This is need to setup a key for the join.
+  mutate(brand = str_replace(brand, '^GENERAL MILLS', 'GENERAL_MILLS')) %>% 
+  # replaces the " " with '_' enabling easy separation and manipulation of variables.
+  mutate(brand = str_replace(brand, ' ', '\\\\')) %>% 
+  # replaces the first ' ' with a '\' so the col can be easily separated into maker and brand.
+  separate(brand, c('maker', 'brand'), sep = '\\\\') %>% 
+  mutate(brand = str_replace_all(brand, ' ', '_'))
+  # replaces the " " with '_' enabling easy separation and manipulation of variables.
+
+# Joins the 2 tables into a single complete dataframe using UPC as the key.
+wip_cereal_data <- wip_product_data %>% 
+  left_join(base_sales_data, 'UPC') 
+
+vtable(wip_cereal_data)
+
+# The following converts variables from class char/numeric to factor as required.
+# Base data sets are base set from which additional cleaning, tidying, EAD will be conducted from. 
+base_cereal_data <- wip_cereal_data %>% 
+  mutate(across(c(maker, brand, package, promo, ad), as.factor))
+
+vtable(base_cereal_data)
+
+write_csv(base_cereal_data, 'base_cereal_data.csv')
+```
+
+# Base EDA Step 1: Uni-variate non-graphical EDA
+
+# Base EDA Step 2: Uni-variate graphical EDA
+
+# Based EDA Step 3: Multi-variate non-grapgical EDA
+
+# Base EDA Step 4: Multi-variate graphical EDA
+
+# Save graphs for use in other documents
+
+

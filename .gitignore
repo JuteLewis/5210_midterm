@@ -37,3 +37,6 @@ vignettes/*.pdf
 
 # R Environment Variables
 .Renviron
+
+# MAC IOS Specific Ignores
+*.DS_STore
