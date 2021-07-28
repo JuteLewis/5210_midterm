@@ -1,0 +1,129 @@
+---
+output: html_document
+---
+
+#### **To: My unreasonably demanding manager**  
+  
+#### **From: Gareth Green**  
+  
+#### **Date: MM/DD/YYYY**   
+  
+#### **RE: Disability Expenditures Analysis**  
+
+***
+
+```{r include = FALSE}
+# Set chunk options for the file
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+```
+
+```{r}
+# Course: 
+# Purpose: 
+# Date: 
+# Author: 
+
+```
+
+```{r}
+# Load libraries
+library(tidyverse) # For cleaning data.
+library(lubridate) # For date conversions.
+library(vtable) # To conduct descriptive EDA.
+library(janitor) # For multi-variable cross table builds.
+library(jtools) # For reviewing and plotting lm relationships.
+library(car) # For hypothesis testing.
+library(scales) # To get convert axis scales and labels.
+library(ggannotate) # For annotations.
+library(patchwork) # Use to put graphs together (faceting) in the same frame.
+library(colorspace)
+library(knitr) # Enable kableExtra integration.
+library(kableExtra) # For formatting tables.
+library(here) # For saving plots to specific folders.
+
+```
+
+```{r, echo = FALSE, results = 'hide'}
+# Following loads the data csv's into the environment via a base_product_data and base_sales_data objects.
+
+base_product_data <- read_csv('mtp_product_data.csv')
+base_sales_data <- read_csv('mtp_sales_data.csv')
+
+# head(base_product_data, 10)
+# NOTE: For small data sets with few variables head easier than vtable. 
+
+# FOR ACTION: (1) Standardize UPCs in both data sets to act as a key for a join. (2) Join the to data sets into a single base set. (3) Convert the promo and add variables to factors. (4) Convert week numbers variables into dates: 'week_of' variable
+
+wip_product_data <- base_product_data %>% 
+  mutate(UPC = str_remove(UPC, '^00-')) %>% 
+  # removes the 00- characters from the UPC
+  mutate(UPC = str_replace_all(UPC, '-', '\\.')) %>% 
+  # replaces the - in the UPC with a '.'.  This is need to setup a key for the join.
+  mutate(brand = str_replace(brand, '^GENERAL MILLS', 'GENERAL_MILLS')) %>% 
+  # replaces the " " with '_' enabling easy separation and manipulation of variables.
+  mutate(brand = str_replace(brand, ' ', '\\\\')) %>% 
+  # replaces the first ' ' with a '\' so the col can be easily separated into maker and brand.
+  separate(brand, c('maker', 'brand'), sep = '\\\\') %>% 
+  mutate(brand = str_replace_all(brand, ' ', '_'))
+  # replaces the " " with '_' enabling easy separation and manipulation of variables.
+
+# Joins the 2 tables into a single complete dataframe using UPC as the key.
+wip_cereal_data <- wip_product_data %>% 
+  left_join(base_sales_data, 'UPC') 
+
+# The following converts variables from class char/numeric to factor as required.
+# Uses lubridate to convert week numbers into actual dates.  No year for the data was given so assumed 2019.
+# Base precedes a data sets that are considered the base from which additional cleaning, tidying, EAD will be conducted from. 
+base_cereal_data <- wip_cereal_data %>% 
+  mutate(across(c(maker, brand, package, promo, ad), as.factor)) %>% 
+  mutate(week_of = ymd('2019/01/01') + weeks(week - 1))
+
+vtable(base_cereal_data)
+```
+
+```{r}
+
+```
+
+Today’s business environment not only requires businesses to constantly review and adjust their advertising and promotion strategies; but also requires them to examine their competitors’ strategies.  By finding the weakness in a competitor’s strategy, business can exploit opportunities to into that competitor’s space. 
+
+This memo will do both cited above, review and offer recommendations on our current strategies for advertisements and promotions and examine offer recommendation regarding our biggest competitor’s, Kelloggs,  advertising and promotion strategy.   
+
+
+
+
+
+
+
+
+
+
+The next section reviews and makes recommendation countering Kellogg current advertising and promotion strategy. 
+
+### Recommendations: 
+
+1. We recommended that the advertising and promotion strategy work on a July-to-July calendar cycle.
+2. We recommend small advertisements are the focus of effort throughout the year with an average of 2-3 advertisements per week.  
+3. We recommend minimal investment in medium advertisements during the July time frame then ramping up to 4-5 during the August to March time frame, then ramp back down to 1.2 for them remainder of the cycle.
+
+**Recommendation 1**: The graph below shows the advertisement trends for GM and Kelloggs over the year. We should expect that having more brands, Kellogg would have more advertisement per week.  It is the overall advertising trends that are of most importance. The trends show that Kelloggs “front loads” its advertising at the beginning of the year with medium sized advertisements being the priority.  This focus makes sense as the first half of the year has the NFL playoffs, NHL and NBA all-star games, and the start of the MLB season. All opportunities for their ads to reach the most consumers. 
+
+![](ad_trends.png){width=500px}
+
+The second half of the year; however, see a change in strategy.  There is a significant reduction in the use of medium ads, with small ads becoming the priority.  This change could be due to Kellogg’s fiscal year which runs January-to-January. Having made such an investment during the first half of the year, their advertising budget may become a constraint during the second half of the year.  Therefore, it appears that Kellogg depends on small ads to merely maintain a presence as marketing budget continues to decline during the second half of the year. This strategy offers an opportunity for GM.  
+
+By realigning GM’s fiscal year to a July cycle allows GM to enter the second half of the year with a strong advertising budget/potential at a time when Kellogg’s is declining. This difference in advertising potential allows GM to be the predominantly seen brand the second half of the year, especially during football season, MLB playoffs and the start of the NBA and NHL seasons.
+
+**Recommendations 2 & 3**: While the various models confirmed that advertisements increased units sold by ~ 2 units/store/week (those stores with ads) when compared to no advertisements, they also consistently showed that small advertisements have a greater influence on the units sold per week for both Kellogg and GM. This appears counter to what graph xx that appears to show mediums ads as the go to.   
+
+When analyzing the small ads, they general fluctuate about +/- 1 ad per week, where in medium ads there is an overall decline in the number medium ads with some very significant reduction happening periodically.  This means that the consume is more likely to see a small ad throughout the year than the mediums ads. 
+
+The graph below shows an example of the impact small advertisements have when compared to medium ads. 
+
+![](ad_influence.png){width=500px}
+
+
+Best regards,
+
+Gareth

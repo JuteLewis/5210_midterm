@@ -43,31 +43,34 @@ The impact of a type II error is like a type II error for H1. While it could lea
 
 A type I error could lead to a loss of market share, something GM could not easily regain without significant effort and cost. A type II error may or may not have a negative impact on future sales depending; thus, we consider a type I error as the bigger risk.  Therefore, the study will set alpha to .05 minimizing the potential for a type I error when answering H2.
 
-# Load and transform data
+# Libraries
 ```{r}
 library(tidyverse) # For cleaning data.
 library(lubridate) # For date conversions.
 library(vtable) # To conduct descriptive EDA.
-library(patchwork) # Use to put graphs together (faceting) in the same frame.
-library(scales) # To get convert axis scales and labels.
-library(here) # For saving plots to specific folders.
+library(janitor) # For multi-variable cross table builds.
 library(jtools) # For reviewing and plotting lm relationships.
-library(janitor) 
+library(car) # For hypothesis testing.
+library(scales) # To get convert axis scales and labels.
 library(ggannotate) # For annotations.
+library(patchwork) # Use to put graphs together (faceting) in the same frame.
+library(colorspace)
+library(knitr) # Enable kableExtra integration.
+library(kableExtra) # For formatting tables.
+library(here) # For saving plots to specific folders.
 ```
 
-# Cleaning and 'Tidying' Data
-```{r}
+# Load and Transforming Data
+```{r message=FALSE, warning=FALSE}
 # Following loads the data csv's into the environment via a base_product_data and base_sales_data objects.
 
 base_product_data <- read_csv('mtp_product_data.csv')
 base_sales_data <- read_csv('mtp_sales_data.csv')
 
-head(base_product_data, 10)
-# NOTE: For small data sets with few variables head easier that vtable. 
+# head(base_product_data, 10)
+# NOTE: For small data sets with few variables head easier than vtable. 
 
-vtable(base_sales_data) 
-# FOR ACTION: (1) Standardize UPCs in both data sets to act as a key for a join. (2) Join the to data sets into a single base set. (3) Convert the promo and add variables to factors.
+# FOR ACTION: (1) Standardize UPCs in both data sets to act as a key for a join. (2) Join the to data sets into a single base set. (3) Convert the promo and add variables to factors. (4) Convert week numbers variables into dates: 'week_of' variable
 
 wip_product_data <- base_product_data %>% 
   mutate(UPC = str_remove(UPC, '^00-')) %>% 
@@ -86,25 +89,719 @@ wip_product_data <- base_product_data %>%
 wip_cereal_data <- wip_product_data %>% 
   left_join(base_sales_data, 'UPC') 
 
-vtable(wip_cereal_data)
-
 # The following converts variables from class char/numeric to factor as required.
-# Base data sets are base set from which additional cleaning, tidying, EAD will be conducted from. 
+# Uses lubridate to convert week numbers into actual dates.  No year for the data was given so assumed 2019.
+# Base precedes a data sets that are considered the base from which additional cleaning, tidying, EAD will be conducted from. 
 base_cereal_data <- wip_cereal_data %>% 
-  mutate(across(c(maker, brand, package, promo, ad), as.factor))
+  mutate(across(c(maker, brand, package, promo, ad), as.factor)) %>% 
+  mutate(week_of = ymd('2019/01/01') + weeks(week - 1))
 
 vtable(base_cereal_data)
 
 write_csv(base_cereal_data, 'base_cereal_data.csv')
 ```
-
 # Base EDA Step 1: Uni-variate non-graphical EDA
+```{r message=FALSE, warning=FALSE}
+# The following reviews the individuals variables.  Focuses on classes of variables.
+vtable(base_cereal_data, lush = TRUE)
+
+# The following is used to get a better understand on central tendencies and skew.
+summary(base_cereal_data)
+
+# The data appears tidy, each variable to a column. The are several variables that could be viewed as a factor - such as UPC - but will convert as required in functions.
+```
+
+## Observations:
+1. Kelloggs appears to produce a majority of the brands, with GM and Post following in order. 
+2. Units sold appears skewed right with the mean being pulled right by the max values.
+3. Price appears slightly skewed left with the mean being ~2.5 cents less than the median.
+4. SD of price is just under $1.
+5. *SURPRISING* There are very few promotions or ad activities across stores across the year across all brands.
+6. There are on 3 makers, 15 brands, 3 flavors but 114 unique UPC. 
+
+## Questions: 
+1. Examine the impact for promo and ad on units sold, especially since they are so few.
+2. What was the ad and promo duration - because they were long events the reason for so few across the year?
 
 # Base EDA Step 2: Uni-variate graphical EDA
 
+```{r}
+# The following will begin to look at trends in Kelloggs cereals as part of answering H2.
+# Builds a kKlloggs base data set.
+base_kelloggs_data <- base_cereal_data %>% 
+  filter(maker == 'KELLOGGS')
+
+# Tallies the units sold by brands.
+base_kelloggs_data %>% 
+  group_by (brand) %>% 
+  tally()
+```
+
+```{r}
+# The following examines the Kellogg's brand variable.  The plot shows total brand sales for the year broken into cup and box sales.
+kellogg_brand_summary_plot <- base_kelloggs_data %>% ggplot() + 
+  geom_bar(aes(x = brand, fill = package), color = 'black', width = .6) +
+  # Uses fill to build a stacked bar to highlight cup and box sales. Width set a little bit smaller to ease reading. Added a black outline to help distiguish cup and box totals. 
+  coord_flip() +
+  # Flips axis for ease of reading
+  labs(title = "Units of Each Brand Sold this Year",
+       x = 'Brands', 
+       y = 'Total Sold During Year',
+       tag = 'Fig 2.1') +
+  theme(plot.tag = element_text(size = 10)) +
+  scale_fill_discrete_qualitative(palette = 'Cold')
+  # Changes color tom something other than default.
+
+kellogg_brand_summary_plot
+```
+
+```{r}
+# The following begins a review of units sold across the year.
+kellogg_unit_sold_summary <-  base_kelloggs_data %>% 
+  group_by(week_of) %>% 
+  summarise(units_sold = sum(units)) %>% 
+  # Creates a variable summing up the units sold (regardless of brand) per week.
+  ggplot() +
+  geom_smooth(aes(x = week_of, y = units_sold), se = FALSE) +
+  labs(title = "Units Sold per Week",
+       x = 'Week of the Year', 
+       y = 'Number of Units Sold', 
+       tag = 'Fig 2.2') +
+  theme(plot.tag = element_text(size = 10)) +
+  ylim(0, 2400) 
+  # Changed the y limits.  The default ggplot y limits displayed a deceivingly steep drop off in units sold during 4th QTR CY.
+
+kellogg_unit_sold_summary
+```
+
+```{r}
+# The following look at the number of units sold by brand. (Multi-Variate?) 
+kellogg_unit_sold_by_brand <-  base_kelloggs_data %>% 
+  group_by(brand, week_of) %>% 
+  summarise(units_sold = sum(units)) %>% 
+  ggplot() +
+  geom_smooth(aes(x = week_of, y = units_sold, color = brand), se = FALSE) +
+  labs(title = 'Mean Number of Units Sold per Week by Brand',
+       x = 'Week of the Year', 
+       y = 'Number of Units Sold', 
+       tag = 'Fig 2.3') +
+  theme(plot.tag = element_text(size = 10))
+
+kellogg_unit_sold_by_brand
+```
+
+```{r}
+# Following looks at the price variable.
+
+# The following builds a boxplot showing the price ranges by brand.
+base_kelloggs_data %>% 
+  ggplot() +
+  geom_boxplot(aes(x = price, y = brand)) +
+  labs(tag = '2.4') +
+  theme(plot.tag = element_text(size = 10))
+```
+
+```{r}
+# The following review the price variable by plotting median price (of all products) across the year.
+kellogg_price_summary_plot <- base_kelloggs_data %>% 
+  group_by(week_of) %>% 
+  summarise(mean_weekly_price = mean(price)) %>% 
+  # Creates a weekly mean price of all products
+  ggplot() +
+  geom_smooth(aes(x = week_of, y = mean_weekly_price), se = FALSE) +
+  scale_y_continuous(labels = dollar) +
+  ylim(3.50, 4.00) +
+  # Adjusted the y limits again.  The default ggplot y limits made the price swing look more dramatic than it really is.
+  labs(title = ' Mean Price of All Products per Week',
+       x = 'Week of the Year',
+       y = 'Price Change in Dollors',
+       tag = 'Fig 2.5') +
+   theme(plot.tag = element_text(size = 10))
+  
+kellogg_price_summary_plot
+```
+
+```{r}
+# The following continues to look at the price variable by drilling down to see price by brand across the year. 
+kellogg_price_per_brand_plot <- base_kelloggs_data %>% 
+  group_by(brand, week_of) %>% 
+  summarise(mean_weekly_price_per_brand = mean(price)) %>% 
+  ggplot() +
+  geom_smooth(aes(x = week_of, y = mean_weekly_price_per_brand, color = brand), se = FALSE) +
+  scale_y_continuous(labels = dollar) +
+  labs(title = 'Mean Price per Brand per Week',
+       x = 'Week of the Year',
+       y = 'Price Change in Cents', 
+       tag = 'Fig 2.6') +
+  theme(plot.tag = element_text(size = 10))
+
+kellogg_price_per_brand_plot
+```
+
+```{r}
+# Following looks at promo and ad variable
+kellogg_promo_ad_summary <- base_kelloggs_data %>% 
+  group_by(week_of) %>% 
+  summarise(total_promos = sum(promo == '1'), 
+            # Counts up the total number of promos per week.
+            total_med_ad = sum(ad == "A"),
+            # Counts up the total number of medium adds per week.
+            total_small_ad = sum(ad == "B")) %>% 
+            # Counts up the total number of small ads per week.
+  ggplot(aes(x = week_of)) +
+  geom_smooth(aes(y = total_promos), color = 'black', se = FALSE) +
+  geom_smooth(aes(y = total_med_ad), color = 'lightblue', se = FALSE) +
+  geom_smooth(aes(y = total_small_ad), color = 'darkblue', se =FALSE) +
+  labs(title = 'Number of Promos and Ads per Week',
+       x = 'Week of the Year',
+       y = 'Number of Promos and Ads',
+       tag = 'Fig 2.7') +
+  theme(plot.tag = element_text(size = 10))
+
+kellogg_promo_ad_summary
+```
+
+## Observations:
+1. Frosted Flakes and Fruit Loops are top sellers selling anywhere from 1500 to 750 more units than remaining products (Fig 2.1).
+2. Counter to the general trend, there are significant price drops in the #1 and #3 top sellers in fourth quarter. This drop also coincides with a drop in units sold (Fig 2.4, 2.5). 
+3. Special K has a rise in units sold starting in ~May then began to drop in August. A rise in price follows the increase in sales.  Price then drops aggressively following a slow down in unit sales (Fig 2.4, 2.6).
+4. Foot Loops continued to see a rise in units sold despite an increase in price (Fig 2.4, 2.6).
+5. There is a general increase in price during fourth quarter (Fig 2.5). 
+6. The number of promos, and ads taper off following a slight bump in the July time frame (Fig 2.7).
+
+## Questions:
+1. Is the increase in fourth quarter price an attempt to meet earning expectation?
+2. What is Kellogg's fiscal year? **Fiscal year is a 01/01 to 12/31 cycle.**
+3. How does promo, ad, and total sale and/or individual product sales stack up?
+4. What drove the bump in Special K sales? 
+
 # Based EDA Step 3: Multi-variate non-grapgical EDA
 
+```{r}
+# The following looks at correlation between, price, vol.
+cor_df <- base_kelloggs_data %>% 
+  select('price', 'volume')
+
+round(cor(cor_df), 2) %>% 
+  kable()
+```
+
+```{r}
+#The following builds a table showing the total number of promos from across the year per brand broken down by ad.
+base_kelloggs_data %>% 
+  tabyl(brand, promo, ad) %>% 
+  # The addition of ad creates an individual table for medium and small ads 
+  adorn_totals(where = c('row', 'col'))
+```
+## Obersavtions: 
+1. *SURPRISING* Smart Start, Special K, Rice Krispies and Frosted Mini Wheat all have similar combinations of promos (0/1), and ads (NONE, A, B) yet Smart Start is selling ~250 - ~315 units less.  With similar ad and promo efforts one might expect the difference to more like that between Special K, and Rice Krispies, a 60 unit difference.  Cocoa Krispies and Raisin Brand do follow the expected trend: then both have consistently fewer promo and ad combinations and thus sell less when compared to the higher selling brands. 
+
+## Questions:
+1. Is Smart Start targeted at a specific demographic? 
+
 # Base EDA Step 4: Multi-variate graphical EDA
+
+```{r}
+# Following analysis will examine the units sold variable against several other variables.  
+
+# The first will examine total units sold over the year against ad, promos and price from across the year. This is a high level glance.  
+price_v_sold_summary <- base_kelloggs_data %>% 
+  group_by(week_of) %>%  
+  summarise(mean_price = round(mean(price), 2),
+            units_sold = round(sum(units),0)) %>% 
+  ggplot(aes(x = week_of)) +
+  geom_smooth(aes(y = mean_price), color = 'green', se = FALSE) +
+  geom_smooth(aes(y = units_sold/500), se = FALSE) +
+  # Scaled units sold to fit on y axis.
+  labs(title = "Mean Product Price per Week against Mean Units Sold per Week",
+       x = 'Weeks of Year',
+       y = 'Units Sold (x 500) and Mean Unit Price',
+       tag = 'Fig 4.1') +
+  ylim(3.0, 5.0) +
+  # Adjusted y limits again because the ggplot default the decline in units sold overly drastic.
+  theme(plot.tag = element_text(size = 10))
+
+price_v_sold_summary
+``` 
+
+```{r}
+# Following will continue the by adding promos and ads per week to the plot trying to tease out any relationship between them.
+price_v_sold_promo_ad_summary <- base_kelloggs_data %>% 
+  group_by(week_of) %>% 
+  summarise(mean_price = round(mean(price), 2),
+            units_sold = round(sum(units),0), 
+            total_promos = sum(promo == '1'), 
+            # Counts up the total number of promos per week.
+            total_med_ad = sum(ad == "A"),
+            # Counts up the total number of medium adds per week.
+            total_small_ad = sum(ad == "B")) %>%   
+  ggplot(aes(x = week_of)) +
+  geom_smooth(aes(y = (units_sold/500)), color = 'black', se = FALSE) + 
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = mean_price),color = 'green', se = FALSE) +
+  geom_smooth(aes(y = (total_promos/10)), color = 'orange', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_med_ad/10), color = 'gray', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_small_ad/10), color = 'brown', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  labs(title = 'Mean Unit Price x Mean Units Sold x \nPromos and Ads per Week',
+       x = 'Week of Year', 
+       y = 'Mean Units Sold (x500), \nMean Price, Number of Promos and Ads',
+       tag = 'Fig 4.2') +
+  theme(plot.tag = element_text(size = 10))
+
+price_v_sold_promo_ad_summary 
+```
+
+```{r}
+# The next lines of code builds combo plots that looks at 6 brands mapping units sold, price, promo, ad across the year. The last chunk patches then all together. 
+smart_start_plot <- base_kelloggs_data %>% 
+  select('brand', 'week_of', 'units', 'price', 'promo', 'ad') %>% 
+  filter(brand == "SMART_START") %>% 
+  group_by(week_of) %>% 
+  summarise(mean_product_price = round(mean(price), 2),
+            units_sold = round(sum(units),0), 
+            total_promos = sum(promo == '1'), 
+            # Counts up the total number of promos per week.
+            total_med_ad = sum(ad == "A"),
+            # Counts up the total number of medium adds per week.
+            total_small_ad = sum(ad == "B")) %>% 
+  ggplot(aes(x = week_of)) +
+  geom_smooth(aes(y = mean_product_price), se = FALSE) +
+  geom_smooth(aes(y = (total_promos/2)), color = 'orange', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_med_ad/2), color = 'gray', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_small_ad/2), color = 'brown', se = FALSE) + geom_smooth(aes(y = units_sold/100), color = 'purple', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  labs(title = 'Smart Start Combo', 
+       x = "Weeks of the Year")
+
+frosted_flakes_plot <- base_kelloggs_data %>% 
+  select('brand', 'week_of', 'units', 'price', 'promo', 'ad') %>% 
+  filter(brand == "FROSTED_FLAKES") %>% 
+  group_by(week_of) %>% 
+  summarise(mean_product_price = round(mean(price), 2),
+            units_sold = round(sum(units),0), 
+            total_promos = sum(promo == '1'), 
+            # Counts up the total number of promos per week.
+            total_med_ad = sum(ad == "A"),
+            # Counts up the total number of medium adds per week.
+            total_small_ad = sum(ad == "B")) %>% 
+  ggplot(aes(x = week_of)) +
+  geom_smooth(aes(y = mean_product_price), se = FALSE) +
+  geom_smooth(aes(y = (total_promos/2)), color = 'orange', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_med_ad/2), color = 'gray', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_small_ad/2), color = 'brown', se = FALSE) + geom_smooth(aes(y = units_sold/100), color = 'purple', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  labs(title = 'Frosted Flakes', 
+       x = "Weeks of the Year")
+
+special_k_plot <- base_kelloggs_data %>% 
+  select('brand', 'week_of', 'units', 'price', 'promo', 'ad') %>% 
+  filter(brand == "SPECIAL_K") %>% 
+  group_by(week_of) %>% 
+  summarise(mean_product_price = round(mean(price), 2),
+            units_sold = round(sum(units),0), 
+            total_promos = sum(promo == '1'), 
+            # Counts up the total number of promos per week.
+            total_med_ad = sum(ad == "A"),
+            # Counts up the total number of medium adds per week.
+            total_small_ad = sum(ad == "B")) %>% 
+  ggplot(aes(x = week_of)) +
+  geom_smooth(aes(y = mean_product_price), se = FALSE) +
+  geom_smooth(aes(y = (total_promos/2)), color = 'orange', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_med_ad/2), color = 'gray', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_small_ad/2), color = 'brown', se = FALSE) + geom_smooth(aes(y = units_sold/100), color = 'purple', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  labs(title = 'Special K Combo', 
+       x = "Weeks of the Year")
+
+frosted_mini_plot <- base_kelloggs_data %>% 
+  select('brand', 'week_of', 'units', 'price', 'promo', 'ad') %>% 
+  filter(brand == "FROSTED_MINI_WHEATS") %>% 
+  group_by(week_of) %>% 
+  summarise(mean_product_price = round(mean(price), 2),
+            units_sold = round(sum(units),0), 
+            total_promos = sum(promo == '1'), 
+            # Counts up the total number of promos per week.
+            total_med_ad = sum(ad == "A"),
+            # Counts up the total number of medium adds per week.
+            total_small_ad = sum(ad == "B")) %>% 
+  ggplot(aes(x = week_of)) +
+  geom_smooth(aes(y = mean_product_price), se = FALSE) +
+  geom_smooth(aes(y = (total_promos/2)), color = 'orange', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_med_ad/2), color = 'gray', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_small_ad/2), color = 'brown', se = FALSE) + geom_smooth(aes(y = units_sold/100), color = 'purple', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  labs(title = 'Frosted Mini Combo', 
+       x = "Weeks of the Year")
+
+rice_krispies_plot <- base_kelloggs_data %>% 
+  select('brand', 'week_of', 'units', 'price', 'promo', 'ad') %>% 
+  filter(brand == "RICE_KRISPIES") %>% 
+  group_by(week_of) %>% 
+  summarise(mean_product_price = round(mean(price), 2),
+            units_sold = round(sum(units),0), 
+            total_promos = sum(promo == '1'), 
+            # Counts up the total number of promos per week.
+            total_med_ad = sum(ad == "A"),
+            # Counts up the total number of medium adds per week.
+            total_small_ad = sum(ad == "B")) %>% 
+  ggplot(aes(x = week_of)) +
+  geom_smooth(aes(y = mean_product_price), se = FALSE) +
+  geom_smooth(aes(y = (total_promos/2)), color = 'orange', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_med_ad/2), color = 'gray', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_small_ad/2), color = 'brown', se = FALSE) + geom_smooth(aes(y = units_sold/100), color = 'purple', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  labs(title = 'Rice Krispies Combo', 
+       x = "Weeks of the Year")
+
+fruit_loops_plot <- base_kelloggs_data %>% 
+  mutate(week_of = ymd('2019/01/01') + weeks(week - 1)) %>% 
+  filter(brand == "FROOT_LOOPS") %>% 
+  group_by(week_of) %>% 
+  summarise(mean_product_price = round(mean(price), 2),
+            units_sold = round(sum(units),0), 
+            total_promos = sum(promo == '1'), 
+            # Counts up the total number of promos per week.
+            total_med_ad = sum(ad == "A"),
+            # Counts up the total number of medium adds per week.
+            total_small_ad = sum(ad == "B")) %>% 
+  ggplot(aes(x = week_of)) +
+  geom_smooth(aes(y = mean_product_price), se = FALSE) +
+  geom_smooth(aes(y = (total_promos/2)), color = 'orange', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_med_ad/2), color = 'gray', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_small_ad/2), color = 'brown', se = FALSE) + geom_smooth(aes(y = units_sold/100), color = 'purple', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  labs(title = 'Foot Loops Combo', 
+       x = "Weeks of the Year")
+
+frosted_flakes_plot <- base_kelloggs_data %>% 
+  select('brand', 'week_of', 'units', 'price', 'promo', 'ad') %>% 
+  filter(brand == "FROSTED_FLAKES") %>% 
+  group_by(week_of) %>% 
+  summarise(mean_product_price = round(mean(price), 2),
+            units_sold = round(sum(units),0), 
+            total_promos = sum(promo == '1'), 
+            # Counts up the total number of promos per week.
+            total_med_ad = sum(ad == "A"),
+            # Counts up the total number of medium adds per week.
+            total_small_ad = sum(ad == "B")) %>% 
+  ggplot(aes(x = week_of)) +
+  geom_smooth(aes(y = mean_product_price), se = FALSE) +
+  geom_smooth(aes(y = (total_promos/2)), color = 'orange', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_med_ad/2), color = 'gray', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  geom_smooth(aes(y = total_small_ad/2), color = 'brown', se = FALSE) + geom_smooth(aes(y = units_sold/100), color = 'purple', se = FALSE) +
+  # Scaled down so information can be displayed on same y axis.
+  labs(title = 'Frosted Flakes Combo', 
+       x = "Weeks of the Year")
+```
+  
+```{r}
+(smart_start_plot + special_k_plot) / 
+  (frosted_mini_plot + rice_krispies_plot) / 
+  (fruit_loops_plot + frosted_flakes_plot)
+```      
+## Observations:
+1. In general it appears that a decrease in promo, and ads lead a decrease in units sold (Fig 4.2). Promos 
+2. Foot Loops (#2 Seller) saw a rise in units sold following a bump in Promo and Ads per week (Combo Graph).
+3. *SURPRISING* Rice Krispies only brand where units sold mirrors promos. There is a slight bump in units sold the lagging a bump in medium ads (Combo Graph). 
+4. Ad priority appears to be medium size ads. 
+5 *SURPRISING* Price appears to follow units sold (as a lag affect) **except** for Smart Start. While units sold decrease price actual increases. There is also a significant investment in medium ads.
+6. Smart Start: There is a bump in the spring followed by a gradual decline in units sold as the amateur sport season progresses (Spring, Summer, Fall; 5Ks, 10K, triathlons, etc.).  People participating in these activities generally have the income to support more expensive cereal. There is also an increase in ads just prior to the start of the new year training season and the corresponding bump in units sold.
+
+## Questions:
+1. Are medium ads more effective in influencing units sold?
+2. What has the greater influence - ads or promos? It appears that Kellogg consistently goes to ads to offset declines in units sold.
+2. Is Smart Start targeted toward a particular segment - say people in to fitness? 
+
+# Detailed EDA and Modeling 
+
+The following will combine Detailed EDA and Modeling to outline the relationship between ads and units sold and promos and units sold. The multi-variable analysis appears to show a consistent leading relationship between ads and promos and the units sold that relationship seems to vary by brand. The following will look deeper into that relationship.
+
+```{r}
+# The following focuses on the impact of ads on units sold. Advertising is a considerable expense and the ROI should be assessed.  The preceding  appears to show a general relationship, it appears inconsistent. 
+
+# The analysis begins by examining the interquartile range of ads by brand. The first builds box plots for the number of medium ads per brand.
+# There are 4 boxplots.  Two look at small ads and 2 looking a medium ads.  The difference is that they are segregated by maker: Genral Mills and Kelloggs. 
+
+# The following build the kelloggs med ad plot.
+med_ad_plot <- base_kelloggs_data %>% 
+  group_by(brand, week_of) %>% 
+  summarise(med_ad_per_week = sum(ad == "A")) %>% 
+            # Counts up the total number of medium adds per week.
+  ggplot(aes(x = brand, y = med_ad_per_week)) +
+  geom_boxplot(width = .5) + 
+  stat_summary(fun.y = "mean", geom = "point", shape = 23, size = 1, fill = "black") +
+  coord_flip()
+
+# The following builds the kellogs small ad plot.
+small_ad_plot <- base_kelloggs_data %>% 
+  group_by(brand, week_of) %>% 
+  summarise(small_ad_per_week = sum(ad == "B")) %>% 
+            # Counts up the total number of medium adds per week.
+   ggplot(aes(x = brand, y = small_ad_per_week)) +
+  geom_boxplot(width = .5) + 
+  stat_summary(fun.y = "mean", geom = "point", shape = 23, size = 1, fill = "black") +
+  coord_flip()
+
+# The following builds the GM med ad plot.
+gm_med_ad_plot <- base_cereal_data %>% 
+  filter(maker == 'GENERAL_MILLS') %>% 
+  group_by(brand, week_of) %>% 
+  summarise(med_ad_per_week = sum(ad == "A")) %>% 
+            # Counts up the total number of medium adds per week.
+  ggplot(aes(x = brand, y = med_ad_per_week)) +
+  geom_boxplot(width = .5) + 
+  stat_summary(fun.y = "mean", geom = "point", shape = 23, size = 1, fill = "black") +
+  coord_flip()
+
+# The following builds the GM small ad plot.
+gm_small_ad_plot <- base_cereal_data %>% 
+  filter(maker == 'GENERAL_MILLS') %>% 
+  group_by(brand, week_of) %>% 
+  summarise(small_ad_per_week = sum(ad == "B")) %>% 
+            # Counts up the total number of medium adds per week.
+  ggplot(aes(x = brand, y = small_ad_per_week)) +
+  geom_boxplot(width = .5) + 
+  stat_summary(fun.y = "mean", geom = "point", shape = 23, size = 1, fill = "black") +
+  coord_flip()
+
+# Following bring them together.
+med_ad_plot / gm_med_ad_plot / small_ad_plot / gm_small_ad_plot
+```
+
+```{r}
+# Figure (Boxplots) confirms Fig 4.2 that Kellogg invested more in medium sized ads than small. It als shows that GM followed the same strategy.  
+# The following will attempt to model the relationship between ads and units sold. 
+# The following converts the ad and promo variables into new variables that could be used as dummy variables for bi and multi-variable regressions. 
+updated_base_cereal_data <- base_cereal_data %>% 
+  filter(maker == c('GENERAL_MILLS', 'KELLOGGS')) %>% 
+  mutate(med_ad_buys = case_when(ad == 'A' ~ '1', ad != 'A' ~ '0'), 
+         sml_ad_buys = case_when(ad == 'B' ~ '1', ad != 'B' ~ '0'), 
+         promo_per_week = case_when(promo == '1' ~ '1', promo != '1' ~ '0'))
+
+# We assume Kellogs believed medium ads offered bigger ROI. The following examines if there was a relationship between units sold and small and medium ads to see if there is indeed a bigger ROI with medium ads.  Will use median as central tendency. For medium ads the means are pulled right of the median by the outliers. Conversely the means of small ads are bulled left of the median by the low number of ads.
+
+# The not only examines Kellogg's strategy but GMs'.
+ad_data <- updated_base_cereal_data %>% 
+  filter(maker == c("GENERAL_MILLS", "KELLOGGS")) %>% 
+  group_by(maker, week_of) %>% 
+  summarise(sold_per_week = sum(units),
+            med_ad_per_week = sum(med_ad_buys == "1"),
+            # Builds a variable for the mean of medium adds per week.
+            small_ad_per_week = sum(sml_ad_buys == "1"))
+            # Builds a variable for the  mean of small adds per week
+
+ad_trend_plot <- ad_data %>% 
+  ggplot(aes(x = week_of, y = med_ad_per_week, color = maker)) +
+  #geom_smooth(aes(y = (sold_per_week/100)), se = FALSE) +
+  geom_smooth(aes(y = med_ad_per_week), se = FALSE) +
+  geom_smooth(aes(y = small_ad_per_week), linetype = 'dashed', se = FALSE) +
+  annotate("point", x = as.Date('2019-02-01'), y = .4, colour = "black") +
+  annotate("point", x = as.Date('2019-03-15'), y = .4, colour = "black") +
+  annotate("point", x = as.Date('2019-02-17'), y = .4, colour = "black") +
+  annotate("point", x = as.Date('2019-10-01'), y = .4, colour = "black") +
+  annotate("point", x = as.Date('2019-09-01'), y = .4, colour = "black") +
+  geom_text(data = data.frame(x = as.Date(c("2019-02-01", "2019-10-02", "2019-03-15", "2019-02-20", "2019-09-01")),
+y = c(0.0666238273313096, 0.0666238273313096, 0.0666238273313096, 0.78, 0.0766238273313096),
+label = c("Super \nBowl", "MLB \nPlayoffs", "March \nMadness", "NBA \nAll-Star", "Footbal")),
+mapping = aes(x = x, y = y, label = label),
+size = 2.47, inherit.aes = FALSE) + 
+geom_text(data = data.frame(x = as.Date(c("2019-01-10", "2019-01-15", "2019-01-08", "2019-01-15")),
+y = c(3.85365336823013, 2.9101263621433, 1.05, 5.01807890125769),
+label = c("Small Ads", "Medium Ads", "Small Ads", "Medium Ads")),
+mapping = aes(x = x, y = y, label = label),
+size = 3, inherit.aes = FALSE) +
+  scale_color_discrete_qualitative(palette = 'Cold') +
+  theme_classic() +
+  labs(title = "Kellogg's and GM Advertising Trend across the Year", 
+       x = "Weeks of the Year", 
+       y = "Number of Ads per Week")
+
+ggsave("ad_trends.png", plot = ad_trend_plot)
+ad_trend_plot
+
+# The box plots and graph show that both bought more medium ads. Kelloggs has more which is expected since they have more brands. The buy pattern in interesting. Kelloggs appears to front load their ads during the first half of the year. GM has a split strategy front loading small ad in the first have with medium ad in the summer followed by a decline in the fall.  GM's medium ad decline is more significant than Kelloggs although GM's small ad decline is shallower. 
+
+```
+
+```{r}
+# The previous medium and small ad plots show that GM and Kellogg appears invest more in medium ads than small ads.  The following assess which ad has a bigger influence on units sold. 
+# The following begins with a bi-variate regression using the new variables to conduct difference of means test between the ad's influence on units sold vice's the influence of no ads. This focuses on kelloggs.
+
+kellogg_df <- updated_base_cereal_data %>% 
+  filter (maker == 'KELLOGGS')
+
+kellogg_med_ad_lm <- lm(units ~ med_ad_buys, kellogg_df)
+effect_plot(kellogg_med_ad_lm, med_ad_buys)
+```
+
+```{r}
+export_summs(kellogg_med_ad_lm)
+```
+
+
+```{r}
+kellogg_small_ad_lm <- lm(units ~ sml_ad_buys, kellogg_df)
+effect_plot(kellogg_small_ad_lm, sml_ad_buys)
+```
+
+```{r}
+export_summs(kellogg_small_ad_lm)
+```
+
+```{r}
+#The following model places all three variables in the model.  Over the year small and medium ads and promos are employed in various combinations during each week. There fore we have to assume that there is some type of relationship between the three that can not be shown via correlation models. Bring them all into the model reduces the potential for endogeneity.
+kellogg_ad_interaction_lm <- lm(units ~ sml_ad_buys + med_ad_buys + promo_per_week, kellogg_df)
+export_summs(kellogg_ad_interaction_lm)
+```
+
+```{r}
+# The following repeats the previous modeling but for GM. 
+gm_df <- updated_base_cereal_data %>% 
+  filter (maker == 'GENERAL_MILLS')
+
+gm_med_ad_lm <- lm(units ~ med_ad_buys, gm_df)
+effect_plot(gm_med_ad_lm, med_ad_buys)
+```
+
+```{r}
+export_summs(gm_med_ad_lm)
+```
+
+```{r}
+gm_small_ad_lm <- lm(units ~ sml_ad_buys, gm_df)
+effect_plot(gm_small_ad_lm, sml_ad_buys)
+```
+
+```{r}
+export_summs(gm_small_ad_lm)
+```
+
+```{r}
+gm_ad_interaction_lm <- lm(units ~ sml_ad_buys + med_ad_buys + promo_per_week, gm_df)
+export_summs(gm_ad_interaction_lm)
+```
+```{r}
+gm_sml_med_comp_lm <- lm(units ~ med_ad_buys + sml_ad_buys, gm_df)
+export_summs(gm_sml_med_comp_lm)
+
+tidy_lm <- tidy(gm_sml_med_comp_lm, conf.int = TRUE)
+```
+
+```{r}
+ad_influence <- tidy_lm %>% 
+  filter(term != '(Intercept)') %>% 
+  ggplot(aes(x = estimate, y = term, color = term)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  coord_flip() +
+  theme_classic() +
+  theme(axis.ticks = element_line(size = 0)) +
+  labs(title = "Small Ads Have a Greater Impact on Units Sold than Medium Ads", 
+       y = ' ', 
+       x = 'Additonal Units Sold per Week \nper Store with Ads',
+       color = 'Ad Types') +
+  scale_color_discrete_qualitative(labels = c('Medium', 'Small'), palette = 'Cold') +
+  scale_y_discrete(labels = c('med_ad_buys1' = ' ', 'sml_ad_buys1' = ' '))
+
+ggsave('ad_influence.png', plot = ad_influence)
+```
+
+
+## Observation:
+
+1. The assumption at the start of the second code block was incorrect. Kellogg FY is Jan to Jan.  It looks like Kellogg marketing expends a majority of its ad budget in the first half of the year with a focus on medium sized ads.  The focus on medium size ads makes sense as the first half of the year has the NFL playoffs, NHL and NBA all star games, and the start of the MLB season. All opportunities their ads to reach the most potential consumers. The second half of the year; however, see a change in strategy.  There is a significant reduction in the use of medium ads, with small ads becoming the priority.  This new prioritization is very evident in the much gentler decrease in small ads when compared to medium ad.  It appears that Kellogg depends on small ads to merely maintain a presence as marketing budget declines during the second half of the year until the holidays when there is a final push with medium size commercials. This strategy appears to have a week point as units sold begin to droop in October and do not show any pickup during the holidays. 
+The importance of small ads maintaining market share is emphasized by the models showing small ads having a larger impact on units sold per week across the year (coefficient of 3.67 at significance of .001) then medium ads have across the year (coefficient of 2.21 at significance of .001). 
+
+2.  The models show that ads, when employed independently or in combination sduring a week have a statistically significant impact on units sold for both makers.  
+
+3. The kellogg interaction model (poor name) shows that ads and promos when combined in a week are reinforcing while the gm model shows that  ads in an a small/medium/promo weekly combination have questionable impact on units sold.  In the gm model promo has a statistically significant impact in units sold. 
+
+## Recommednation:
+
+
+# Statistical Analysis
+
+```{r}
+# The following is going review the statistical significance of the above observations.
+
+# The first test will assess homoscedasticity of the residual for the kellogg model.
+kellogg_res <- resid(kellogg_ad_interaction_lm)
+qqnorm(kellogg_res)
+abline(0,1)
+```
+```{r}
+plot(density(kellogg_res))
+```
+```{r}
+#The next tests to see if there really is a diiference between med and small ad coefficients. 
+linearHypothesis(kellogg_ad_interaction_lm, 'sml_ad_buys1 = med_ad_buys1')
+```
+```{r}
+linearHypothesis(kellogg_ad_interaction_lm, 'sml_ad_buys1 = 0')
+```
+```{r}
+linearHypothesis(kellogg_ad_interaction_lm, 'med_ad_buys1 = 0')
+```
+
+
+```{r}
+# The following repeats the tests for the gm model.
+
+# The first test will assess homoscedasticity of the residual for the kellogg model.
+gm_res <- resid(gm_ad_interaction_lm)
+qqnorm(gm_res)
+```
+
+```{r}
+plot(density(gm_res))
+```
+```{r}
+linearHypothesis(gm_ad_interaction_lm, 'sml_ad_buys1 = med_ad_buys1')
+```
+
+```{r}
+linearHypothesis(gm_ad_interaction_lm, 'promo_per_week1 = 0')
+```
+```{r}
+gm_ad_only_lm <- lm(units ~ med_ad_buys + sml_ad_buys, gm_df)
+gm_ad_only_res <- resid(gm_ad_only_lm)
+qqnorm(gm_ad_only_res)
+```
+```{r}
+plot(density(gm_ad_only_res))
+```
+```{r}
+linearHypothesis(gm_ad_only_lm, 'sml_ad_buys1 = 0')
+```
+```{r}
+linearHypothesis(gm_ad_only_lm, 'med_ad_buys1 = 0')
+```
+## Observations:
+1.  All the models have heteroscedasticity indicating some type of correlation within the error.
+
+2.  The linear hypothesis testing for the Kellogg interactive model shows that the ad variables indeed have an influence on unit price.  The testng also shows that there is a possibility that the influence the ads have are equal.  That is not surprising since the coefficients are on .5 apart combined with the heteroscedasticity to induce enough bias. 
+
+3.  The linear hypothesis test confirms that in the gm interactive model, promo is accurate in its influence on units sold.
+
+4. Further analysis shows that gm small/medium ad weekly combinations have reinforcing effects on units sold. 
+
 
 # Save graphs for use in other documents
 
